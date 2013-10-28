@@ -58,6 +58,7 @@ struct vsock_sock {
 	 */
 	struct list_head pending_links;
 	struct list_head accept_queue;
+	struct list_head dgram_skb;
 	bool rejected;
 	struct delayed_work dwork;
 	u32 peer_shutdown;

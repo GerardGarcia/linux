@@ -685,6 +685,7 @@ struct sock *__vsock_create(struct net *net,
 	vsk->listener = NULL;
 	INIT_LIST_HEAD(&vsk->pending_links);
 	INIT_LIST_HEAD(&vsk->accept_queue);
+	INIT_LIST_HEAD(&vsk->dgram_skb); /* TODO free list entries on shutdown and limit list size or timeout somehow? */
 	vsk->rejected = false;
 	vsk->sent_request = false;
 	vsk->ignore_connecting_rst = false;

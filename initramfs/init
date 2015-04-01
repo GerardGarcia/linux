@@ -1,0 +1,27 @@
+#!/bin/sh
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t configfs none /sys/kernel/config
+mount -t debugfs none /sys/kernel/debug
+mount -t tmpfs none /tmp
+
+echo 8 >/proc/sys/kernel/printk
+
+insmod /lib/modules/4.2.0-rc3.bz1006536+/kernel/drivers/virtio/virtio.ko dyndbg==p
+insmod /lib/modules/4.2.0-rc3.bz1006536+/kernel/drivers/virtio/virtio_ring.ko dyndbg==p
+insmod /lib/modules/4.2.0-rc3.bz1006536+/kernel/drivers/virtio/virtio_pci.ko dyndbg==p
+insmod /lib/modules/4.2.0-rc3.bz1006536+/kernel/net/vmw_vsock/vsock.ko dyndbg==p
+insmod /lib/modules/4.2.0-rc3.bz1006536+/kernel/net/vmw_vsock/virtio_transport_common.ko dyndbg==p
+
+#echo virtio_dev_probe >/sys/kernel/debug/tracing/set_graph_function
+#echo function_graph >/sys/kernel/debug/tracing/current_tracer
+#echo 1 >/sys/kernel/debug/tracing/tracing_on
+
+insmod /lib/modules/4.2.0-rc3.bz1006536+/kernel/net/vmw_vsock/virtio_transport.ko dyndbg==p
+
+#echo 0 >/sys/kernel/debug/tracing/tracing_on
+#echo >/sys/kernel/debug/tracing/current_tracer
+#echo >/sys/kernel/debug/tracing/set_graph_function
+#cat /sys/kernel/debug/tracing/trace
+
+exec /bin/sh -i

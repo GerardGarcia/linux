@@ -117,7 +117,9 @@ virtio_transport_send_pkt(struct vsock_sock *vsk,
 					 src_cid, src_port,
 					 dst_cid, dst_port);
 	if (!pkt) {
-		/* TODO what about decrementing total_tx_buf */
+		mutex_lock(&vsock->tx_lock);
+		vsock->total_tx_buf -= pkt_len;
+		mutex_unlock(&vsock->tx_lock);
 		virtio_transport_put_credit(trans, pkt_len);
 		return -ENOMEM;
 	}
@@ -220,8 +222,8 @@ static void virtio_transport_send_pkt_work(struct work_struct *work)
 			virtio_transport_dec_tx_pkt(pkt);
 			/* Release refcnt taken in virtio_transport_send_pkt */
 			sock_put(sk);
+			vsock->total_tx_buf -= pkt->len;
 			virtio_transport_free_pkt(pkt);
-			vsock->total_tx_buf -= len; /* TODO should this be pkt->len so the guest cannot influence our tx buffer space? */
 			added = true;
 		}
 	} while (!virtqueue_enable_cb(vq));

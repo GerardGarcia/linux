@@ -222,6 +222,9 @@ vhost_transport_send_pkt(struct vsock_sock *vsk,
 					 src_cid, src_port,
 					 dst_cid, dst_port);
 	if (!pkt) {
+		mutex_lock(&vq->mutex);
+		vsock->total_tx_buf -= pkt_len;
+		mutex_unlock(&vq->mutex);
 		virtio_transport_put_credit(trans, pkt_len);
 		return -ENOMEM;
 	}

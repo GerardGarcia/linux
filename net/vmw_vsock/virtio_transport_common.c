@@ -1048,7 +1048,7 @@ virtio_transport_recv_listen(struct sock *sk, struct virtio_vsock_pkt *pkt)
 		/* So no pending socket are responsible for this pkt, create one */
 		pr_debug("%s: create pending\n", __func__);
 		pending = __vsock_create(sock_net(sk), NULL, sk, GFP_KERNEL,
-				sk->sk_type);
+				sk->sk_type, 0);
 		if (!pending) {
 			virtio_transport_send_reset(vsk, pkt);
 			return -ENOMEM;

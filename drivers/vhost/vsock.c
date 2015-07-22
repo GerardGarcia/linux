@@ -248,27 +248,30 @@ static struct virtio_transport_pkt_ops vhost_ops = {
 };
 
 static struct virtio_vsock_pkt *
-vhost_vsock_alloc_pkt(struct vhost_virtqueue *vq)
+vhost_vsock_alloc_pkt(struct vhost_virtqueue *vq,
+		      unsigned int out, unsigned int in)
 {
 	struct virtio_vsock_pkt *pkt;
-	int ret;
-	int len;
+	struct iov_iter iov_iter;
+	size_t nbytes;
+	size_t len;
+
+	if (in != 0) {
+		vq_err(vq, "Expected 0 input buffers, got %u\n", in);
+		return NULL;
+	}
 
 	pkt = kzalloc(sizeof(*pkt), GFP_KERNEL);
 	if (!pkt)
 		return NULL;
 
-	len = sizeof(pkt->hdr);
-	/* TODO check in and out.  Support flexible descriptor lengths */
-	if (unlikely(vq->iov[0].iov_len != len)) {
-		vq_err(vq, "Expecting pkt->hdr = %d, got %zu bytes\n",
-		       len, vq->iov[0].iov_len);
-		kfree(pkt);
-		return NULL;
-	}
-	ret = __copy_from_user(&pkt->hdr, vq->iov[0].iov_base, len);
-	if (ret) {
-		vq_err(vq, "Faulted on virtio_vsock_hdr\n");
+	len = iov_length(vq->iov, out);
+	iov_iter_init(&iov_iter, WRITE, vq->iov, out, len);
+
+	nbytes = copy_from_iter(&pkt->hdr, sizeof(pkt->hdr), &iov_iter);
+	if (nbytes != sizeof(pkt->hdr)) {
+		vq_err(vq, "Expected %zu bytes for pkt->hdr, got %zu bytes\n",
+		       sizeof(pkt->hdr), nbytes);
 		kfree(pkt);
 		return NULL;
 	}
@@ -294,10 +297,12 @@ vhost_vsock_alloc_pkt(struct vhost_virtqueue *vq)
 		return NULL;
 	}
 
-	ret = __copy_from_user(pkt->buf, vq->iov[1].iov_base, pkt->len);
-	if (ret) {
-		vq_err(vq, "Faulted on virtio_vsock_hdr\n");
+	nbytes = copy_from_iter(pkt->buf, pkt->len, &iov_iter);
+	if (nbytes != pkt->len) {
+		vq_err(vq, "Expected %u byte payload, got %zu bytes\n",
+		       pkt->len, nbytes);
 		virtio_transport_free_pkt(pkt);
+		return NULL;
 	}
 
 	return pkt;
@@ -320,7 +325,8 @@ static void vhost_vsock_handle_tx_kick(struct vhost_work *work)
 	struct vhost_vsock *vsock = container_of(vq->dev, struct vhost_vsock,
 						 dev);
 	struct virtio_vsock_pkt *pkt;
-	int head, out, in;
+	int head;
+	unsigned int out, in;
 	bool added = false;
 	u32 len;
 
@@ -340,7 +346,7 @@ static void vhost_vsock_handle_tx_kick(struct vhost_work *work)
 			break;
 		}
 
-		pkt = vhost_vsock_alloc_pkt(vq);
+		pkt = vhost_vsock_alloc_pkt(vq, out, in);
 		if (!pkt) {
 			vq_err(vq, "Faulted on pkt\n");
 			continue;

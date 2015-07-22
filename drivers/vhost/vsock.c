@@ -80,15 +80,19 @@ static void
 vhost_transport_do_send_pkt(struct vhost_vsock *vsock,
 			    struct vhost_virtqueue *vq)
 {
-	struct virtio_vsock_pkt *pkt;
 	bool added = false;
-	unsigned out, in;
-	struct sock *sk;
-	int head, ret;
 
 	mutex_lock(&vq->mutex);
 	vhost_disable_notify(&vsock->dev, vq);
 	for (;;) {
+		struct virtio_vsock_pkt *pkt;
+		struct iov_iter iov_iter;
+		unsigned out, in;
+		struct sock *sk;
+		size_t nbytes;
+		size_t len;
+		int head;
+
 		if (list_empty(&vsock->send_pkt_list)) {
 			vhost_enable_notify(&vsock->dev, vq);
 			break;
@@ -108,32 +112,34 @@ vhost_transport_do_send_pkt(struct vhost_vsock *vsock,
 			break;
 		}
 
-		/* TODO check out == 0 and in >= 1 */
-
 		pkt = list_first_entry(&vsock->send_pkt_list,
 				       struct virtio_vsock_pkt, list);
 		list_del_init(&pkt->list);
 
-		/* FIXME: no assumption of frame layout */
-		ret = __copy_to_user(vq->iov[0].iov_base, &pkt->hdr,
-				     sizeof(pkt->hdr));
-		if (ret) {
+		if (out) {
+			virtio_transport_free_pkt(pkt);
+			vq_err(vq, "Expected 0 output buffers, got %u\n", out);
+			break;
+		}
+
+		len = iov_length(&vq->iov[out], in);
+		iov_iter_init(&iov_iter, READ, &vq->iov[out], in, len);
+
+		nbytes = copy_to_iter(&pkt->hdr, sizeof(pkt->hdr), &iov_iter);
+		if (nbytes != sizeof(pkt->hdr)) {
 			virtio_transport_free_pkt(pkt);
 			vq_err(vq, "Faulted on copying pkt hdr\n");
 			break;
 		}
-		if (pkt->buf && pkt->len > 0) {
-			/* TODO avoid iov[1].iov_base buffer overflow, check pkt->len! */
-			ret = __copy_to_user(vq->iov[1].iov_base, pkt->buf,
-					    pkt->len);
-			if (ret) {
-				virtio_transport_free_pkt(pkt);
-				vq_err(vq, "Faulted on copying pkt buf\n");
-				break;
-			}
+
+		nbytes = copy_to_iter(pkt->buf, pkt->len, &iov_iter);
+		if (nbytes != pkt->len) {
+			virtio_transport_free_pkt(pkt);
+			vq_err(vq, "Faulted on copying pkt buf\n");
+			break;
 		}
 
-		vhost_add_used(vq, head, pkt->len);
+		vhost_add_used(vq, head, pkt->len); /* TODO should this be sizeof(pkt->hdr) + pkt->len? */
 		added = true;
 
 		virtio_transport_dec_tx_pkt(pkt);

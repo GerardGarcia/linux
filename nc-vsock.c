@@ -220,7 +220,9 @@ static int xfer_data(int in_fd, int out_fd)
 	remaining = nbytes;
 	while (remaining > 0) {
 		nbytes = write(out_fd, send_ptr, remaining);
-		if (nbytes <= 0) {
+		if (nbytes < 0 && errno == EAGAIN) {
+			nbytes = 0;
+		} else if (nbytes <= 0) {
 			return -1;
 		}
 

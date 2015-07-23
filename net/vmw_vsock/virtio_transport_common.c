@@ -544,6 +544,7 @@ int virtio_transport_do_socket_init(struct vsock_sock *vsk,
 		trans->buf_size	= ptrans->buf_size;
 		trans->buf_size_min = ptrans->buf_size_min;
 		trans->buf_size_max = ptrans->buf_size_max;
+		trans->peer_buf_alloc = ptrans->peer_buf_alloc;
 	} else {
 		trans->buf_size = VIRTIO_VSOCK_DEFAULT_BUF_SIZE;
 		trans->buf_size_min = VIRTIO_VSOCK_DEFAULT_MIN_BUF_SIZE;
@@ -551,9 +552,6 @@ int virtio_transport_do_socket_init(struct vsock_sock *vsk,
 	}
 
 	trans->buf_alloc = trans->buf_size;
-	//trans->peer_buf_alloc = trans->buf_size;
-	trans->peer_fwd_cnt = 0;
-	trans->dgram_id = 0;
 
 	pr_debug("%s: trans->buf_alloc=%d\n", __func__, trans->buf_alloc);
 

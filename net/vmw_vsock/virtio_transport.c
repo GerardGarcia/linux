@@ -23,6 +23,7 @@
 
 static struct workqueue_struct *virtio_vsock_workqueue;
 static struct virtio_vsock *the_virtio_vsock;
+static DEFINE_MUTEX(the_virtio_vsock_mutex); /* protects the_virtio_vsock */
 static void virtio_vsock_rx_fill(struct virtio_vsock *vsock);
 
 struct virtio_vsock {
@@ -347,18 +348,25 @@ static int virtio_vsock_probe(struct virtio_device *vdev)
 		"rx",
 		"tx",
 	};
-	struct virtio_vsock *vsock;
-	int ret = -ENOMEM;
+	struct virtio_vsock *vsock = NULL;
 	u32 guest_cid;
+	int ret;
+
+	ret = mutex_lock_interruptible(&the_virtio_vsock_mutex);
+	if (ret)
+		return ret;
 
 	/* Only one virtio-vsock device per guest is supported */
-	/* FIXME: need lock for the_virtio_vsock ?*/
-	if (the_virtio_vsock)
-		return -EBUSY;
+	if (the_virtio_vsock) {
+		ret = -EBUSY;
+		goto out;
+	}
 
 	vsock = kzalloc(sizeof(*vsock), GFP_KERNEL);
-	if (!vsock)
-		return -ENOMEM;
+	if (!vsock) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	vsock->vdev = vdev;
 
@@ -389,12 +397,15 @@ static int virtio_vsock_probe(struct virtio_device *vdev)
 	mutex_lock(&vsock->rx_lock);
 	virtio_vsock_rx_fill(vsock);
 	mutex_unlock(&vsock->rx_lock);
+
+	mutex_unlock(&the_virtio_vsock_mutex);
 	return 0;
 
 out_vqs:
 	vsock->vdev->config->del_vqs(vsock->vdev);
 out:
 	kfree(vsock);
+	mutex_unlock(&the_virtio_vsock_mutex);
 	return ret;
 }
 
@@ -402,8 +413,11 @@ static void virtio_vsock_remove(struct virtio_device *vdev)
 {
 	struct virtio_vsock *vsock = vdev->priv;
 
+	mutex_lock(&the_virtio_vsock_mutex);
 	the_virtio_vsock = NULL;
 	vsock_core_exit();
+	mutex_unlock(&the_virtio_vsock_mutex);
+
 	kfree(vsock);
 }
 

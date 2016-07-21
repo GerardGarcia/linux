@@ -279,8 +279,7 @@ vhost_transport_send_pkt(struct vsock_sock *vsk,
 
 static struct virtio_vsock_pkt *
 vhost_vsock_alloc_pkt(struct vhost_virtqueue *vq,
-		      unsigned int out, unsigned int in,
-		      int *error)
+		      unsigned int out, unsigned int in)
 {
 	struct virtio_vsock_pkt *pkt;
 	struct iov_iter iov_iter;
@@ -289,14 +288,12 @@ vhost_vsock_alloc_pkt(struct vhost_virtqueue *vq,
 
 	if (in != 0) {
 		vq_err(vq, "Expected 0 input buffers, got %u\n", in);
-		*error = -EINVAL;
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	pkt = kzalloc(sizeof(*pkt), GFP_KERNEL);
 	if (!pkt){
-		*error = -ENOMEM;
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 	}
 
 	len = iov_length(vq->iov, out);
@@ -307,8 +304,7 @@ vhost_vsock_alloc_pkt(struct vhost_virtqueue *vq,
 		vq_err(vq, "Expected %zu bytes for pkt->hdr, got %zu bytes\n",
 		       sizeof(pkt->hdr), nbytes);
 		kfree(pkt);
-		*error = -EINVAL;
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	if (le16_to_cpu(pkt->hdr.type) == VIRTIO_VSOCK_TYPE_STREAM)
@@ -321,15 +317,13 @@ vhost_vsock_alloc_pkt(struct vhost_virtqueue *vq,
 	/* The pkt is too big */
 	if (pkt->len > VIRTIO_VSOCK_MAX_PKT_BUF_SIZE) {
 		kfree(pkt);
-		*error = -EINVAL;
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	pkt->buf = kmalloc(pkt->len, GFP_KERNEL);
 	if (!pkt->buf) {
 		kfree(pkt);
-		*error = -ENOMEM;
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	nbytes = copy_from_iter(pkt->buf, pkt->len, &iov_iter);
@@ -337,8 +331,7 @@ vhost_vsock_alloc_pkt(struct vhost_virtqueue *vq,
 		vq_err(vq, "Expected %u byte payload, got %zu bytes\n",
 		       pkt->len, nbytes);
 		virtio_transport_free_pkt(pkt);
-		*error = -EINVAL;
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	return pkt;
@@ -354,7 +347,6 @@ static void vhost_vsock_handle_tx_kick(struct vhost_work *work)
 	int head;
 	unsigned int out, in;
 	bool added = false;
-	int error;
 
 	mutex_lock(&vq->mutex);
 
@@ -376,10 +368,10 @@ static void vhost_vsock_handle_tx_kick(struct vhost_work *work)
 			break;
 		}
 
-		pkt = vhost_vsock_alloc_pkt(vq, out, in, &error);
+		pkt = vhost_vsock_alloc_pkt(vq, out, in);
 
-		if (!pkt) {
-			if (error == -ENOMEM) {
+		if (IS_ERR(pkt)) {
+			if (PTR_ERR(pkt) == -ENOMEM) {
 				vhost_discard_vq_desc(vq, 1);
 
 				if (!timer_pending(&vsock->tx_kick)) {
@@ -393,7 +385,7 @@ static void vhost_vsock_handle_tx_kick(struct vhost_work *work)
 				break;
 			} else {
 				vq_err(vq, "Faulted on pkt\n");
-				continue;
+				break;
 			}
 		} else if (unlikely(timer_pending(&vsock->tx_kick))) {
 			del_timer(&vsock->tx_kick);
@@ -597,6 +589,7 @@ static int vhost_vsock_dev_release(struct inode *inode, struct file *file)
 	vhost_dev_stop(&vsock->dev);
 	vhost_dev_cleanup(&vsock->dev, false);
 	kfree(vsock->dev.vqs);
+	del_timer(&vsock->tx_kick);
 	vhost_vsock_free(vsock);
 	return 0;
 }
